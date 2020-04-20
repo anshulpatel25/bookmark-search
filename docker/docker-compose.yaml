@@ -9,10 +9,8 @@ services:
       - bookmark
     environment:
       - discovery.type=single-node
-    # volumes:
-    #   - '/home/anshul/jenkins_data:/var/jenkins_home'
-    #   - '/var/run/docker.sock:/var/run/docker.sock'
-    #   - '/usr/bin/docker:/usr/bin/docker'
+    volumes:
+      - '${LOCAL_DATA_DIR}:/usr/share/elasticsearch/data'
   kibana:
     restart: always
     image: docker.elastic.co/kibana/kibana:7.6.2
