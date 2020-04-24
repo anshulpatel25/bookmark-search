@@ -1,4 +1,6 @@
 import csv
+import hashlib
+import logging
 import re
 from datetime import datetime
 from functools import partial
@@ -9,32 +11,57 @@ from urllib.parse import urlparse
 
 import bookmarks_parser as bp
 import requests
+import sqlite3
 from bs4 import BeautifulSoup as bs
 from elasticsearch import Elasticsearch
 
+logging.basicConfig(level=logging.INFO)
 
-def ingest_data(bookmark_url, host, port, index):
+
+def ingest_data(bookmark_url, host, port, index, db_location):
+
+    url_hash = hashlib.sha256(bytes(bookmark_url, "utf-8")).hexdigest()
 
     ingestion_client = get_ingestion_client(host, port)
 
-    print(f"Processing {bookmark_url} ...")
-    try:
-        raw_resp = requests.get(bookmark_url, timeout=10)
+    connection = sqlite3.connect(db_location)
+    cursor = connection.cursor()
 
-        print(f"Transforming {bookmark_url} ...")
-        raw_text = bs(raw_resp.content, "html.parser").get_text(strip=True)
-        processed_data = re.sub(r"[\r\t\n]", "", re.sub(r"[^\w\s]", "", raw_text))
-        website = "{uri.netloc}".format(uri=urlparse(bookmark_url))
-        print(f"Ingesting {bookmark_url} ...")
-        ingestion_client.index(
-            index=index,
-            body={"url": bookmark_url, "content": processed_data, "website": website},
-        )
-        print(f"Successfully processed {bookmark_url}")
-        return {"status": "success", "url": bookmark_url, "reason": None}
-    except Exception as error:
-        print(f"Unable to Process {bookmark_url}")
-        return {"status": "fail", "reason": str(error), "url": bookmark_url}
+    exists = cursor.execute(
+        "SELECT EXISTS(SELECT  1 FROM PROCESS_STATUS ps WHERE hash=?)", (url_hash,)
+    ).fetchone()
+
+    logging.info("Processing %s ...", bookmark_url)
+
+    if not exists[0]:
+        try:
+            raw_resp = requests.get(bookmark_url, timeout=10)
+
+            logging.info("Transforming %s ...", bookmark_url)
+            raw_text = bs(raw_resp.content, "html.parser").get_text(strip=True)
+            processed_data = re.sub(r"[\r\t\n]", "", re.sub(r"[^\w\s]", "", raw_text))
+            website = "{uri.netloc}".format(uri=urlparse(bookmark_url))
+            logging.info("Ingesting %s ...", bookmark_url)
+            ingestion_client.index(
+                index=index,
+                body={
+                    "url": bookmark_url,
+                    "content": processed_data,
+                    "website": website,
+                },
+            )
+            logging.info("Successfully processed %s", bookmark_url)
+
+            cursor.execute("insert into PROCESS_STATUS values (?)", (url_hash,))
+            connection.commit()
+            return {"status": "success", "url": bookmark_url, "reason": None}
+        except Exception as error:
+            logging.info("Unable to Process %s", bookmark_url)
+            return {"status": "fail", "reason": str(error), "url": bookmark_url}
+        finally:
+            connection.close()
+    else:
+        logging.info("Skipping %s as it exists", bookmark_url)
 
 
 def get_bookmark_urls(bookmarks_tree):
@@ -58,25 +85,40 @@ def get_ingestion_client(host, port):
     return Elasticsearch([{"host": host, "port": port}])
 
 
-def process(location, host, port, index):
+def initialize_db(db_location):
+    logging.info("Initializing Database ...")
+    connection = sqlite3.connect(db_location)
+    cursor = connection.cursor()
+    cursor.execute(
+        """
+                    CREATE TABLE IF NOT EXISTS PROCESS_STATUS (hash text)"""
+    )
+    connection.commit()
+    connection.close()
+    logging.info("Database initialized")
+
+
+def process(location, host, port, index, db_location):
 
     bookmarks_tree = get_bookmark_tree(location)
     bookmarks_url_list = get_bookmark_urls(bookmarks_tree)
 
-    test_list = bookmarks_url_list[:10]
-
     with Pool(4) as mp:
         # results = mp.map(ingest_data, bookmarks_url_list)
         results = mp.map(
-            partial(ingest_data, host=host, port=port, index=index), test_list
+            partial(
+                ingest_data, host=host, port=port, index=index, db_location=db_location
+            ),
+            bookmarks_url_list,
         )
 
-    result_filename = "result_" + datetime.now().strftime("%H_%M_%S") + ".csv"
+    result_filename = "result_" + datetime.now().strftime("%Y_%m_%d_%H_%M_%S") + ".csv"
     with open(result_filename, "w", newline="") as result_file:
         writer = csv.writer(result_file)
         writer.writerow(["URL", "STATUS", "REASON"])
         for result in results:
-            writer.writerow([result["url"], result["status"], result["reason"]])
+            if result is not None:
+                writer.writerow([result["url"], result["status"], result["reason"]])
 
 
 def main():
@@ -118,13 +160,24 @@ def main():
         help="Location to Bookmarkfile",
     )
 
+    parser.add_option(
+        "-d",
+        "--database",
+        dest="database_location",
+        type="string",
+        help="Location to SqliteDB, it will be created if not provided",
+    )
+
     (options, args) = parser.parse_args()
+
+    initialize_db(options.database_location)
 
     process(
         location=options.location,
         host=options.server,
         port=options.port,
         index=options.index,
+        db_location=options.database_location,
     )
 
 
