@@ -10,7 +10,7 @@ services:
     environment:
       - discovery.type=single-node
     volumes:
-      - '${LOCAL_DATA_DIR}:/usr/share/elasticsearch/data'
+      - '${LOCAL_DATA_DIR}/elasticsearch:/usr/share/elasticsearch/data'
   kibana:
     restart: always
     image: docker.elastic.co/kibana/kibana:7.6.2
