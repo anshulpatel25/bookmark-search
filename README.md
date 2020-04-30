@@ -27,7 +27,7 @@ Develop a solution which can provide full text search across your bookmarked lin
 * **Python:** It is used to parse, scrape the bookmark links.
 * **Elasticsearch:** It is used to store the parsed content and as search engine.
 * **Kibana:** It is used as UI to search through the stored content.
-* **SQlite3:** It is used to stored the metadata of parsed bookmark links. Redis is a smarter choice and can provide O(1) for metadata lookup against Sqlite3's O(n), but still Sqlite3 was chosen as process of storing/fetching metadata is infrequent and Sqlite3 is not required to be a in running state as opposed to Redis which does save CPU time and Memory.
+* **SQlite3:** It is used to stored the metadata of parsed bookmark links. Redis is a smarter choice and can provide O(1) for metadata lookup against Sqlite3's O(n), but still Sqlite3 was chosen as process of storing/fetching metadata is infrequent and Sqlite3 is not required to be in running state as opposed to Redis, which does save CPU time and Memory.
 
 ## Data Flow
 
@@ -39,6 +39,8 @@ Develop a solution which can provide full text search across your bookmarked lin
 ### Pre-requisite
 
 * Python3
+* Docker
+* Docker-Compose
 
 ### Steps
 
